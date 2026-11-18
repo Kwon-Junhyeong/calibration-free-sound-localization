@@ -1,118 +1,67 @@
-"""Analytic rigid-sphere replicas for the em32 and a batched (GEMM) gauge-marginalized scorer.
-
-Convention matches the BEM loader output used by the DCASE scorer (BEMTableLazy(apply_conjugate=True)):
-the replica is the e^{-i w t} total surface pressure for a unit plane wave arriving from direction d
-(d = unit vector toward the source), and frame CSMs are conjugated before scoring.
-"""
+"""Direction scoring with microphone-pair ratios. A constant gain and phase on each channel cancel in the fit."""
 import itertools
-import os
 import numpy as np
-from scipy.special import spherical_jn, spherical_yn
-
-C_SND = 343.0
-LOCATA = os.environ.get("LOCATA_FRAMES", "data/locata")
-
-
-def uvec(az, el):
-    a, e = np.radians(az), np.radians(el)
-    return np.stack([np.cos(e) * np.cos(a), np.cos(e) * np.sin(a), np.sin(e)], -1)
-
-
-def legendre(x, nmax):
-    """P_0..P_nmax at x (any shape) -> (nmax+1, *x.shape)."""
-    P = np.empty((nmax + 1,) + x.shape)
-    P[0] = 1.0
-    if nmax:
-        P[1] = x
-    for n in range(1, nmax):
-        P[n + 1] = ((2 * n + 1) * x * P[n] - n * P[n - 1]) / (n + 1)
-    return P
-
-
-def sphere_replicas(dirs, mics, freqs, radius=None, nmax=None):
-    """Total pressure on a rigid sphere at capsule positions `mics` (M,3) for plane waves from `dirs` (D,3).
-    Returns (D, M, F) complex. Uses p = sum_n (2n+1) i^n * i / ((ka)^2 h_n'(ka)) * P_n(-d . r_hat)."""
-    r = np.linalg.norm(mics, axis=1)
-    a = float(np.mean(r)) if radius is None else radius
-    rhat = mics / r[:, None]
-    ka = 2 * np.pi * np.asarray(freqs, float) * a / C_SND
-    ka = np.maximum(ka, 1e-6)
-    if nmax is None:
-        nmax = int(np.ceil(ka.max())) + 12
-    n = np.arange(nmax + 1)[:, None]
-    hp = (spherical_jn(n, ka[None], derivative=True) + 1j * spherical_yn(n, ka[None], derivative=True))
-    coef = (2 * n + 1) * (1j ** n) * 1j / (ka[None] ** 2 * hp)          # (N+1, F)
-    x = -(dirs @ rhat.T)                                                 # (D, M)
-    P = legendre(x, nmax)                                                # (N+1, D, M)
-    return np.einsum("ndm,nf->dmf", P, coef, optimize=True)
-
-
-def freefield_replicas(dirs, mics, freqs):
-    """Point-microphone plane-wave replicas in the same convention (arrival advance for capsules facing d)."""
-    tau = -(dirs @ mics.T) / C_SND                                       # (D, M) delay relative to origin
-    return np.exp(2j * np.pi * tau[:, :, None] * np.asarray(freqs)[None, None, :])
 
 
 class PairScorer:
-    """Gauge-marginalized relative-transfer scorer, vectorized over directions and frames.
+    """Residual of every direction after fitting one complex number per microphone pair.
 
-    For pair p=(i,j): T = C_ij / C_jj, w = |C_ij| (or a given weight), M_ij = M_i / M_j.
-    eps_p(theta) = 1 - |<M_ij, T>_w|^2 / (||M_ij||_w^2 ||T||_w^2);  J = mean_p eps_p.
-    Per frame the cost is two (D x F)(F) products per pair, i.e. a batched GEMV / GEMM over frames.
+    For pair (i, j): T = C_ij / C_jj from the recording and M_ij = M_i / M_j from the body model.
+    eps = 1 - |<M_ij, T>_w|^2 / (||M_ij||_w^2 ||T||_w^2) with w = |C_ij|, and J is the mean over pairs.
     """
 
-    def __init__(self, M, pairs=None):
-        D, Mn, F = M.shape
-        self.pairs = pairs or list(itertools.combinations(range(Mn), 2))
-        # only conj(M_ij) and |M_ij|^2 are kept, to stay within a few hundred MB per table
+    def __init__(self, M):
+        """M: body responses (direction, mic, freq)."""
+        D, n_mic, F = M.shape
+        self.pairs = list(itertools.combinations(range(n_mic), 2))
         self.MijH = np.empty((len(self.pairs), D, F), np.complex64)
         for p, (i, j) in enumerate(self.pairs):
             self.MijH[p] = np.conj(M[:, i] / (M[:, j] + 1e-20))
         self.Mabs2 = (self.MijH.real ** 2 + self.MijH.imag ** 2).astype(np.float32)
 
-    def frame_terms(self, C, weight="abs"):
-        """C: (B, M, M, F) conjugated CSMs in the band -> T (B,P,F), w (B,P,F)."""
-        ii = np.array([i for i, _ in self.pairs]); jj = np.array([j for _, j in self.pairs])
+    def frame_terms(self, C):
+        """C: covariance blocks (block, mic, mic, freq). Returns T and w, both (block, pair, freq)."""
+        ii = np.array([i for i, _ in self.pairs])
+        jj = np.array([j for _, j in self.pairs])
         Cij = C[:, ii, jj, :]
-        Cjj = C[:, jj, jj, :].real + 1e-20
-        T = Cij / Cjj
-        if weight == "abs":
-            w = np.abs(Cij)
-        elif weight == "uniform":
-            w = np.ones_like(Cij.real)
-        elif weight == "coh":
-            w = np.abs(Cij) / np.sqrt(C[:, ii, ii, :].real * Cjj)
-        else:
-            raise ValueError(weight)
-        return T.astype(np.complex64), w.astype(np.float32)
+        T = Cij / (C[:, jj, jj, :].real + 1e-20)
+        return T.astype(np.complex64), np.abs(Cij).astype(np.float32)
 
-    def residuals(self, C, weight="abs", per_pair=False):
-        """Return J (B, D) (or eps (B,P,D) if per_pair)."""
-        T, w = self.frame_terms(C, weight)
-        wT = w * T                                                        # (B,P,F)
-        num = np.einsum("bpf,pdf->bpd", wT, self.MijH, optimize=True)     # batched GEMM over pairs
-        den = np.einsum("bpf,pdf->bpd", w, self.Mabs2, optimize=True)
-        tn = (w * np.abs(T) ** 2).sum(-1)                                 # (B,P)
-        eps = 1.0 - (np.abs(num) ** 2) / (den * tn[:, :, None] + 1e-30)
-        return eps if per_pair else eps.mean(1)
+    def residuals(self, C, batch=64):
+        """J (block, direction), lower is better."""
+        out = []
+        for b in range(0, len(C), batch):
+            T, w = self.frame_terms(C[b:b + batch])
+            num = np.einsum("bpf,pdf->bpd", w * T, self.MijH, optimize=True)
+            den = np.einsum("bpf,pdf->bpd", w, self.Mabs2, optimize=True)
+            tn = (w * np.abs(T) ** 2).sum(-1)
+            out.append((1.0 - np.abs(num) ** 2 / (den * tn[:, :, None] + 1e-30)).mean(1))
+        return np.concatenate(out)
 
 
-def gc_err(a1, e1, a2, e2):
-    a1, e1, a2, e2 = map(np.radians, (a1, e1, a2, e2))
-    c = np.sin(e1) * np.sin(e2) + np.cos(e1) * np.cos(e2) * np.cos(a1 - a2)
-    return np.degrees(np.arccos(np.clip(c, -1, 1)))
+def refine(grid, J, radius=8.0):
+    """Direction between grid points: quadratic fit of J around the best grid point, in its tangent plane."""
+    cos_r = np.cos(np.radians(radius))
+    out = np.empty((len(J), 3))
+    for b in range(len(J)):
+        u = grid[int(J[b].argmin())]
+        nb = np.flatnonzero(grid @ u >= cos_r)
+        a = np.array([0, 0, 1.0]) if abs(u[2]) < 0.9 else np.array([1.0, 0, 0])
+        e1 = np.cross(u, a)
+        e1 /= np.linalg.norm(e1)
+        e2 = np.cross(u, e1)
+        x, y = grid[nb] @ e1, grid[nb] @ e2
+        A = np.stack([np.ones_like(x), x, y, x * x, y * y, x * y], 1)
+        c, *_ = np.linalg.lstsq(A, J[b, nb], rcond=None)
+        H = np.array([[2 * c[3], c[5]], [c[5], 2 * c[4]]])
+        out[b] = u
+        if np.all(np.linalg.eigvalsh(H) > 0):
+            xy = np.linalg.solve(H, -c[1:3])
+            if np.linalg.norm(xy) < np.radians(6):
+                v = u + xy[0] * e1 + xy[1] * e2
+                out[b] = v / np.linalg.norm(v)
+    return out
 
 
-def az_err(a, b):
-    d = np.abs(a - b) % 360
-    return np.minimum(d, 360 - d)
-
-
-def load_task(split, task):
-    Z = np.load(f"{LOCATA}/frames_{split}_task{task}.npz")
-    act = Z["active"].astype(bool)
-    ref = Z if "mics" in Z.files else np.load(f"{LOCATA}/frames_eval_task1.npz")   # same em32 subset in every task
-    bm = ref["band_mask"].astype(bool)
-    return dict(csm=np.conj(Z["csm"][act])[:, :, :, bm], gt_az=Z["gt_az"][act], gt_el=Z["gt_el"][act],
-                est_az=Z["est_az"][act], est_el=Z["est_el"][act], rec=Z["rec"][act], t=Z["t"][act],
-                cand=ref["cand"], freqs=ref["freqs"][bm], mics=ref["mics"].astype(float))
+def azimuth_elevation(u):
+    return np.degrees(np.arctan2(u[:, 1], u[:, 0])), np.degrees(np.arcsin(np.clip(u[:, 2], -1, 1)))

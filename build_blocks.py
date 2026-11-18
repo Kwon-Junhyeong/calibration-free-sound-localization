@@ -26,8 +26,6 @@ for n, fn in enumerate(files):
         Xs = X[:, :, sel]
         C = np.einsum("ift,jft->ijf", Xs, np.conj(Xs)) / len(sel)
         blocks.append(C.astype(np.complex64)); az.append(a); el.append(e); fid.append(n)
-    if n % 40 == 0:
-        print(n, os.path.basename(fn), "active frames", act.sum(), "blocks so far", len(blocks), flush=True)
 np.savez("data/box_blocks.npz", csm=np.array(blocks), az=np.array(az), el=np.array(el), fid=np.array(fid),
          freqs=np.fft.rfftfreq(NFFT, 1 / FS).astype(np.float32))
 print("total blocks", len(blocks))
