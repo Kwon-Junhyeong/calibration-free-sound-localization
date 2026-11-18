@@ -1,4 +1,4 @@
-"""Channel delays estimated from unlabeled blocks. The delays are the same in every block, the direction is not."""
+"""Channel delays estimated from unlabeled blocks. The delays stay fixed across blocks while the direction varies."""
 import numpy as np
 
 FS = 16000
@@ -6,7 +6,7 @@ LAGS = np.arange(-8, 8.01, 0.25) / FS          # candidate delay of each pair, s
 
 
 def pair_lags(S, C, f, batch=8):
-    """Fit with an unknown delay per pair. Returns J (block, direction) and the pair delays at the best direction."""
+    """Scores with a fitted delay per pair. Returns J (block, direction) and the pair delays at the best direction of each block."""
     E = np.exp(2j * np.pi * f[:, None] * LAGS[None, :]).astype(np.complex64)
     J, lags = [], []
     for b in range(0, len(C), batch):

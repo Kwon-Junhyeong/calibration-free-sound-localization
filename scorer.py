@@ -40,7 +40,7 @@ class PairScorer:
 
 
 def refine(grid, J, radius=8.0):
-    """Direction between grid points: quadratic fit of J around the best grid point, in its tangent plane."""
+    """Refines each direction with a quadratic fit of J around its best grid point, in the tangent plane."""
     cos_r = np.cos(np.radians(radius))
     out = np.empty((len(J), 3))
     for b in range(len(J)):

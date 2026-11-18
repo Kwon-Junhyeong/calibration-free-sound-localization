@@ -6,11 +6,11 @@ Sound source localization on a robot body without manual calibration of the micr
 
 ## Body responses from CAD
 
-The responses of the four microphones are computed from the body's CAD model with the boundary element method, with no acoustic measurement (`build_replicas.py`).
+The responses of the four microphones come from a boundary element model of the body's CAD geometry, with no acoustic measurement. `build_replicas.py` takes them from the BEM table.
 
 ## Matching microphone-pair ratios
 
-The recording is matched to the computed responses through the ratios between microphone pairs. A constant gain and phase on each channel only scale a pair ratio by one complex number, which the scorer fits and removes, so the channels need no calibration (`scorer.py`).
+The recording is matched to the computed responses through microphone-pair ratios. A constant gain and phase on each channel multiply a pair ratio by one complex number, which the scorer fits and removes, so gain and phase need no calibration (`scorer.py`).
 
 ## Delays estimated without labels
 
