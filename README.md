@@ -6,7 +6,7 @@ Sound source localization on a robot body without manual calibration of the micr
 
 ## Body responses from CAD
 
-The responses of the four microphones come from a boundary element model of the body's CAD geometry, with no acoustic measurement. `build_replicas.py` takes them from the BEM table.
+The responses of the four microphones come from a boundary element model of the body's CAD geometry, with no acoustic measurement. `build_replicas.py` takes them from the BEM table, computed with an earlier version of [stl2bem](https://github.com/Kwon-Junhyeong/stl2bem).
 
 ## Matching microphone-pair ratios
 
