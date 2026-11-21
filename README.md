@@ -1,6 +1,6 @@
 # Calibration-Free Sound Localization
 
-Sound source localization on a robot body without manual calibration of the microphone channels. Each channel introduces an unknown gain, phase shift and delay, and conventional calibration needs a known source or labeled recordings for each device. Labeled acoustic data is hard to collect, so a CAD model of the body and unlabeled audio take its place. Research internship at the KIST AI and Robotics Institute, Humanoid Research Center (2026).
+Sound source localization on a robot body without measured or labeled acoustic data. Acoustic data is hard to collect, label and train on: every device has to be measured, every recording needs its true direction, and a trained model has to be retrained when the robot or the microphone positions change. The body's response is computed from CAD, the channel delays are estimated from unlabeled audio, and the direction is found by matching, with no trained model. Each microphone channel has an unknown gain, phase shift and delay, and none of them is calibrated by hand. Research internship at the KIST AI and Robotics Institute, Humanoid Research Center (2026).
 
 ![System](docs/system.png)
 
@@ -33,5 +33,7 @@ python build_replicas.py BEM_TABLE.h5    # data/box_replicas.npz
 python build_blocks.py RECORDINGS_DIR    # data/box_blocks.npz
 python locate.py                         # channel delays, then one direction per block
 ```
+
+`build_replicas.py` keeps the directions on a 5 degree grid (2,664). On the 2,094 one-second blocks of the box recordings, `locate.py` gives a median error of 3.9 degrees.
 
 The BEM table and the recordings are not part of the repository.
