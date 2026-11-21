@@ -23,16 +23,18 @@ A 3D-printed box with four microphones was measured from 264 directions. Gains, 
 - With the delays estimated without labels, the median error is 3.7 degrees. Without that estimate it is 31.9 degrees, and SRP-PHAT without calibration gives 48.4 degrees.
 - With the delays recovered from 10 s of unlabeled audio, the median error is 4.2 degrees.
 
-On the public LOCATA recordings, the error is 5.7 degrees with the body model, against 7.9 degrees with a free-field model.
+On the public LOCATA recordings (Task 1, 13 recordings, eight of the 32 capsules of a spherical microphone array, 109 one-second blocks), the median error is 5.7 degrees with the BEM model of the array body and 5.8 degrees with the analytic model of a rigid sphere, against 7.9 degrees with a free-field model. `locata.py` produces the rigid-sphere and free-field results.
 
 ## Run
 
 ```sh
 pip install -r requirements.txt
-python build_replicas.py BEM_TABLE.h5    # data/box_replicas_5deg.npz
-python build_blocks.py RECORDINGS_DIR    # data/box_blocks.npz
-python unknown_channels.py               # each matcher under added gains, phases and delays
-python self_calibration.py               # delays from unlabeled blocks, then the directions
+python build_replicas.py BEM_TABLE.h5      # data/box_replicas_5deg.npz
+python build_blocks.py RECORDINGS_DIR      # data/box_blocks.npz
+python unknown_channels.py                 # each matcher under added gains, phases and delays
+python self_calibration.py                 # delays from unlabeled blocks, then the directions
+python build_locata_blocks.py LOCATA_DIR   # data/locata_blocks.npz from the LOCATA corpus
+python locata.py                           # rigid-sphere and free-field matching on LOCATA
 ```
 
-The BEM table and the recordings are not part of the repository.
+The box's BEM table and recordings are not part of the repository. The LOCATA corpus is public.

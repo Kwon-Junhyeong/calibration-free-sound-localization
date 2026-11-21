@@ -1,4 +1,4 @@
-"""Blind channel-delay calibration from unlabelled speech on the measured box.
+"""Blind channel-delay calibration from unlabeled speech on the measured box.
 Stage 1: delay-marginalized scorer per block -> direction and per-pair lag at that direction.
 Stage 2: per-pair median over N blocks, least-squares per-mic delays (mic 0 reference).
 Stage 3: compensate the delays, rerun the exact flat-gauge scorer.
