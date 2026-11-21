@@ -14,13 +14,13 @@ The recording is matched to the computed responses through microphone-pair ratio
 
 ## Delays estimated without labels
 
-On a body, a change of direction changes more than the delay, so direction and channel delay can be separated. The channel delays stay fixed across 1 s blocks while the source direction varies, so pooling the blocks estimates the delays without labels (`delays.py`).
+On a body, a change of direction changes more than the delay, so direction and channel delay can be separated. The channel delays stay fixed across 1 s blocks while the source direction varies, so pooling the blocks estimates the delays without labels (`self_calibration.py`).
 
 ## Results
 
-A 3D-printed box with four microphones was measured from 264 directions.
+A 3D-printed box with four microphones was measured from 264 directions. Gains, phases and delays of up to 4 samples are then added to its channels in software (`unknown_channels.py`).
 
-- With unknown channel delays added, the median error is 3.7 degrees. SRP-PHAT without calibration gives 48.4 degrees.
+- With the delays estimated without labels, the median error is 3.7 degrees. Without that estimate it is 31.9 degrees, and SRP-PHAT without calibration gives 48.4 degrees.
 - With the delays recovered from 10 s of unlabeled audio, the median error is 4.2 degrees.
 
 On the public LOCATA recordings, the error is 5.7 degrees with the body model, against 7.9 degrees with a free-field model.
@@ -29,11 +29,10 @@ On the public LOCATA recordings, the error is 5.7 degrees with the body model, a
 
 ```sh
 pip install -r requirements.txt
-python build_replicas.py BEM_TABLE.h5    # data/box_replicas.npz
+python build_replicas.py BEM_TABLE.h5    # data/box_replicas_5deg.npz
 python build_blocks.py RECORDINGS_DIR    # data/box_blocks.npz
-python locate.py                         # channel delays, then one direction per block
+python unknown_channels.py               # each matcher under added gains, phases and delays
+python self_calibration.py               # delays from unlabeled blocks, then the directions
 ```
-
-`build_replicas.py` keeps the directions on a 5 degree grid (2,664). On the 2,094 one-second blocks of the box recordings, `locate.py` gives a median error of 3.9 degrees.
 
 The BEM table and the recordings are not part of the repository.

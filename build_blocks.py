@@ -1,7 +1,6 @@
-"""1 s spatial covariance blocks from the 264 box recordings, speech frames only.
+"""1-s spatial covariance blocks from the 264 box recordings (ch1-4 = panels 0,3,5,6), speech-active only.
 
-usage: python build_blocks.py RECORDINGS_DIR
-"""
+usage: python build_blocks.py RECORDINGS_DIR"""
 import glob, os, re, sys
 import numpy as np
 from scipy.io import wavfile
@@ -26,6 +25,8 @@ for n, fn in enumerate(files):
         Xs = X[:, :, sel]
         C = np.einsum("ift,jft->ijf", Xs, np.conj(Xs)) / len(sel)
         blocks.append(C.astype(np.complex64)); az.append(a); el.append(e); fid.append(n)
+    if n % 40 == 0:
+        print(n, os.path.basename(fn), "active frames", act.sum(), "blocks so far", len(blocks), flush=True)
 np.savez("data/box_blocks.npz", csm=np.array(blocks), az=np.array(az), el=np.array(el), fid=np.array(fid),
          freqs=np.fft.rfftfreq(NFFT, 1 / FS).astype(np.float32))
 print("total blocks", len(blocks))
