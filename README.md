@@ -1,31 +1,98 @@
 # Calibration-Free Sound Localization
 
-Sound source localization on a robot body without measured or labeled acoustic data. Acoustic data is hard to collect, label and train on: every device has to be measured, every recording needs its true direction, and a trained model has to be retrained when the robot or the microphone positions change. The body's response is computed from CAD, the channel delays are estimated from unlabeled audio, and the direction is found by matching, with no trained model. Each microphone channel has an unknown gain, phase shift and delay, and none of them is calibrated by hand. Research internship at the KIST AI and Robotics Institute, Humanoid Research Center (2026).
+Sound source localization on a robot body without measured responses, direction labels or manual channel calibration. The body's response is computed from its CAD geometry, the delays of the microphone channels are estimated from unlabeled audio, and the direction is found by matching, with no trained model. Research internship at the KIST AI and Robotics Institute, Humanoid Research Center (2026).
+
+![Acoustic data is hard to collect, hard to label and hard to train on, and the cycle starts again for a new robot or microphone position](docs/problem.png)
+
+On recordings of a 3D-printed box with channel gains, phases and delays added in software, the median error is 3.7° with the delays estimated from unlabeled audio, against 48.4° for SRP-PHAT. On the public LOCATA recordings, a model of the array body gives 5.7°, against 7.9° for a free-field model.
+
+**Technical summary**
+
+- **Body response from CAD.** Computed with the boundary element method (BEM) for every direction, with no acoustic measurement.
+- **Pair-ratio matching.** The complex factor that each channel's constant gain and phase put on a microphone pair is removed in closed form.
+- **Channel delays from unlabeled audio.** Pooled over one-second blocks; 10 blocks give a median error of 4.2°.
+- **No trained model.** A new robot or microphone layout needs a new BEM table and unlabeled audio, not a new model.
+
+## Problem and users
+
+On a robot, the body changes the sound that reaches each microphone, so free-field models fit poorly, and the usual ways to get the body's response are costly (figure above). The device is measured, or a model is trained on recordings with known directions and retrained when the robot or the microphone positions change. On top of that, each channel of a real array has its own gain, phase shift and delay, which are calibrated by hand.
+
+## Design requirements
+
+- **No acoustic measurement.** The body's response comes from its CAD geometry.
+- **No labels.** The channel delays come from recordings without known directions.
+- **No training.** The direction is found by matching, so nothing has to be retrained for a new body.
+- **Unknown channels.** Each channel's gain, phase and delay are unknown.
+
+## System architecture
 
 ![System](docs/system.png)
 
+The dashed box is an existing tool, boxes with a solid colored outline are code in this repository, and gray boxes are inputs.
+
+- **Existing tools and data:** BEM tables from [stl2bem](https://github.com/Kwon-Junhyeong/stl2bem), the public LOCATA corpus.
+- **Developed for this project:** response extraction, block covariances, the pair-ratio scorer, the delay estimation from unlabeled blocks, and the experiments on the box and on LOCATA.
+
 ## Body responses from CAD
 
-The responses of the four microphones come from a boundary element model of the body's CAD geometry, with no acoustic measurement. `build_replicas.py` takes them from the BEM table, computed with an earlier version of [stl2bem](https://github.com/Kwon-Junhyeong/stl2bem).
+<img src="docs/response.png" width="700" alt="Level change between microphones 1 and 3 of the box when the source moves from 60 to 90 degrees: free field, computed and measured">
+
+`build_replicas.py` takes the responses of the four microphones from a BEM table of the body on a 5° grid of 2,664 directions. On a body, a change of direction changes the level difference between microphones as well as the delay. In the figure, the level difference between microphones 1 and 3 changes by up to 8.6 dB when the source moves from 60° to 90°; the free-field model predicts no change, and the computed response follows the measurement.
 
 ## Matching microphone-pair ratios
 
-The recording is matched to the computed responses through microphone-pair ratios. A constant gain and phase on each channel multiply a pair ratio by one complex number, which the scorer fits and removes, so gain and phase need no calibration (`scorer.py`).
+`build_blocks.py` splits a recording into one-second blocks and keeps the covariance of the speech frames of each block. For each of the six microphone pairs, `scorer.py` compares the measured ratio of the pair's cross-spectra with the computed ratio of the two microphones' responses, over frequency and for every direction. A gain and phase that are constant over frequency multiply a pair ratio by one complex number; the scorer uses the normalized correlation between the two ratios, which removes the best-fitting complex number in closed form, and averages the six residuals. The direction with the smallest residual is refined with a quadratic fit between grid points.
 
 ## Delays estimated without labels
 
-On a body, a change of direction changes more than the delay, so direction and channel delay can be separated. The channel delays stay fixed across 1 s blocks while the source direction varies, so pooling the blocks estimates the delays without labels (`self_calibration.py`).
+A delay adds a phase that grows linearly with frequency, while a change of direction also changes the level differences and the shape of the pair ratios, so direction and channel delay can be separated. `self_calibration.py` works in three steps on the recording's own blocks:
+
+1. For each block, a scorer that also searches over the delay of each pair picks the direction, and keeps the delay of each pair at that direction.
+2. The channel delays stay fixed while the source direction varies, so the median of each pair's delay over the blocks gives six pair delays. Least squares turns them into one delay per microphone, with microphone 1 as the reference.
+3. The delays are removed from the recording and the blocks are matched again with the pair-ratio scorer.
 
 ## Results
 
-A 3D-printed box with four microphones was measured from 264 directions. Gains, phases and delays of up to 4 samples are then added to its channels in software (`unknown_channels.py`).
+**Measured box.** A 3D-printed box with four microphones was recorded from 264 directions, and the first two one-second blocks of each recording are used (528 blocks). Gains, phases and delays of up to 4 samples were added to its channels in software (`unknown_channels.py`); each value is the mean over three random sets of channel errors. The error is the angle between the estimated and the true direction.
 
-- With the delays estimated without labels, the median error is 3.7 degrees. Without that estimate it is 31.9 degrees, and SRP-PHAT without calibration gives 48.4 degrees.
-- With the delays recovered from 10 s of unlabeled audio, the median error is 4.2 degrees.
+| Method | Median error, mean of three sets |
+|---|---:|
+| SRP-PHAT without calibration | 48.4° |
+| Body model, delays not estimated | 31.9° |
+| Free-field model, delays estimated from all 528 blocks | 13.0° |
+| Body model, delays estimated from all 528 blocks | 3.7° |
+| Body model, delays estimated from 10 random blocks | 4.2° |
 
-On the public LOCATA recordings (Task 1, 13 recordings, eight of the 32 capsules of a spherical microphone array, 109 one-second blocks), the median error is 5.7 degrees with the BEM model of the array body and 5.8 degrees with the analytic model of a rigid sphere, against 7.9 degrees with a free-field model. `locata.py` produces the rigid-sphere and free-field results.
+Estimating the delays brings the body model from 31.9° to 3.7°. With delays estimated by the same procedure, the free-field model stays at 13.0°.
 
-## Run
+![Median error against the amount of unlabeled audio, and against the channel errors added to the box](docs/result.png)
+
+**LOCATA.** Task 1 of the public LOCATA recordings: 13 recordings, eight of the 32 capsules of a spherical microphone array, 109 one-second blocks. The same pair-ratio matching, without delay estimation, runs with three models of the array on a grid of 2° in azimuth and 3° in elevation.
+
+| Model of the array | Median error |
+|---|---:|
+| BEM model of the array body | 5.7° |
+| Analytic rigid sphere | 5.8° |
+| Free field | 7.9° |
+
+Both models of the array body give lower errors than the free-field model.
+
+## Repository structure
+
+| Path | Contents |
+|---|---|
+| `build_replicas.py` | Microphone responses from a BEM table, 5° grid |
+| `build_blocks.py` | One-second blocks and their covariances from the box recordings |
+| `scorer.py` | Pair-ratio matching with the gain and phase of each pair removed |
+| `self_calibration.py` | Channel delays from unlabeled blocks, then the directions |
+| `unknown_channels.py` | Each matcher under added gains, phases and delays |
+| `common.py` | Shared functions: channel errors added in software, scoring, the SRP-PHAT baseline, peak refinement, the error |
+| `build_locata_blocks.py`, `locata.py` | Blocks from the LOCATA corpus; rigid-sphere and free-field matching |
+| `docs/` | Figures |
+
+## Setup and run
+
+Software: Python 3 with the packages in `requirements.txt`. Inputs: a BEM table of the box from stl2bem, the box recordings and the LOCATA corpus.
 
 ```sh
 pip install -r requirements.txt
@@ -36,5 +103,3 @@ python self_calibration.py                 # delays from unlabeled blocks, then 
 python build_locata_blocks.py LOCATA_DIR   # data/locata_blocks.npz from the LOCATA corpus
 python locata.py                           # rigid-sphere and free-field matching on LOCATA
 ```
-
-The box's BEM table and recordings are not part of the repository. The LOCATA corpus is public.
