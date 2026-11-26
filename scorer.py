@@ -1,8 +1,9 @@
-"""Analytic rigid-sphere replicas and a batched (GEMM) gauge-marginalized scorer.
+"""Pair-ratio matching (PairScorer) and the analytic responses (replicas) of a rigid sphere and of free field.
 
-Convention:
-the replica is the e^{-i w t} total surface pressure for a unit plane wave arriving from direction d
-(d = unit vector toward the source), and frame CSMs are conjugated before scoring.
+PairScorer works with any responses and block covariances as long as both use the same time convention.
+sphere_replicas and freefield_replicas below are e^{-iwt}: the total pressure for a unit plane wave arriving from
+direction d (d = unit vector toward the source). The STFT covariances are e^{+jwt}, so locata.py conjugates them
+before matching. The box experiments use a BEM table, which is already e^{+jwt} (common.py).
 """
 import itertools
 import numpy as np
@@ -46,17 +47,18 @@ def sphere_replicas(dirs, mics, freqs, radius=None, nmax=None):
 
 
 def freefield_replicas(dirs, mics, freqs):
-    """Point-microphone plane-wave replicas in the same convention (arrival advance for capsules facing d)."""
+    """Point-microphone plane-wave responses in the same e^{-iwt} convention (capsules facing d hear it first)."""
     tau = -(dirs @ mics.T) / C_SND                                       # (D, M) delay relative to origin
     return np.exp(2j * np.pi * tau[:, :, None] * np.asarray(freqs)[None, None, :])
 
 
 class PairScorer:
-    """Gauge-marginalized relative-transfer scorer, vectorized over directions and frames.
+    """Pair-ratio matching, vectorized over directions and blocks.
 
     For pair p=(i,j): T = C_ij / C_jj, w = |C_ij| (or a given weight), M_ij = M_i / M_j.
     eps_p(theta) = 1 - |<M_ij, T>_w|^2 / (||M_ij||_w^2 ||T||_w^2);  J = mean_p eps_p.
-    Per frame the cost is two (D x F)(F) products per pair, i.e. a batched GEMV / GEMM over frames.
+    The normalized correlation removes the complex factor that the channels' constant gains and phases put on
+    the pair. Per block the cost is two (D x F)(F) products per pair, i.e. a batched GEMV / GEMM over blocks.
     """
 
     def __init__(self, M, pairs=None):
@@ -69,7 +71,8 @@ class PairScorer:
         self.Mabs2 = (self.MijH.real ** 2 + self.MijH.imag ** 2).astype(np.float32)
 
     def frame_terms(self, C, weight="abs"):
-        """C: (B, M, M, F) conjugated CSMs in the band -> T (B,P,F), w (B,P,F)."""
+        """C: (B, M, M, F) block covariances in the band, in the time convention of the responses
+        -> T (B,P,F), w (B,P,F)."""
         ii = np.array([i for i, _ in self.pairs]); jj = np.array([j for _, j in self.pairs])
         Cij = C[:, ii, jj, :]
         Cjj = C[:, jj, jj, :].real + 1e-20

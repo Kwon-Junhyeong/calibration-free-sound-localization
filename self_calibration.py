@@ -1,10 +1,12 @@
-"""Blind channel-delay calibration from unlabeled speech on the measured box.
-Stage 1: delay-marginalized scorer per block -> direction and per-pair lag at that direction.
-Stage 2: per-pair median over N blocks, least-squares per-mic delays (mic 0 reference).
-Stage 3: compensate the delays, rerun the exact flat-gauge scorer.
-Ground truth is used only for scoring. Free-field replicas are run as the control (expected to fail)."""
+"""Channel delays estimated from unlabeled blocks of the box recordings, then the directions.
+1. For each block, pair-ratio matching that also searches the delay of each pair picks the direction and keeps
+   the delay of each pair at that direction.
+2. The median of each pair's delay over N blocks, then least squares for one delay per microphone (microphone 1
+   is the reference).
+3. The delays are removed and the blocks are matched again without the delay search.
+The true directions are used only for the error. The free-field responses are run as the control."""
 import numpy as np
-from common import (PairScorer, BEM, FF, C0, gt, f, E, LAGS, FS, refine, err, gauge, scores_flat)
+from common import (PairScorer, BEM, FF, C0, f, LAGS, FS, refine, err, channel_errors, scores_flat, delay_search)
 
 PAIRS = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
 A = np.zeros((6, 3))
@@ -14,14 +16,10 @@ for p, (i, j) in enumerate(PAIRS):            # delta_ij = d_i - d_j, unknowns d
 
 
 def stage1(S, C):
+    """per block: the direction found with the delay search, and the delay of each pair at that direction."""
     lag, est = [], []
     for b in range(0, len(C), 8):
-        T, w = S.frame_terms(C[b:b + 8])
-        X = (w * T)[:, :, None, :] * S.MijH[None]
-        num = np.abs(X @ E) ** 2
-        den = np.einsum("bpf,pdf->bpd", w, S.Mabs2, optimize=True)
-        tn = (w * np.abs(T) ** 2).sum(-1)
-        J = (1 - num.max(-1) / (den * tn[:, :, None] + 1e-30)).mean(1)
+        J, num = delay_search(S, C[b:b + 8])
         d0 = J.argmin(1)
         lag.append(LAGS[num[np.arange(len(d0)), :, d0].argmax(-1)])          # (B, P) lag at the chosen direction
         est.append(d0)
@@ -42,7 +40,7 @@ def compensate(C, d):
 rng = np.random.default_rng(7)
 for mode, seeds in (("clean", (0,)), ("gp+d1.5", (0, 1, 2)), ("gp+d4", (0, 1, 2))):
     for seed in seeds:
-        g = gauge(seed, mode)
+        g = channel_errors(seed, mode)
         C = (g[None, :, None, :] * np.conj(g)[None, None, :, :] * C0).astype(np.complex64)
         dphi = np.angle(g[:, 1:] * np.conj(g[:, :-1])).mean(1)
         true_d = -dphi / (2 * np.pi * (f[1] - f[0])); true_d = true_d - true_d[0]

@@ -1,15 +1,15 @@
 """Channel gains, phases and delays added to the measured box recordings: does the body keep the array
-localizable when the channel delays are unknown? Matching with the body's replicas and with free-field replicas,
-with and without the delay estimate, and SRP-PHAT. 2 one-second blocks per direction (528), 3 seeds."""
+localizable when the channel delays are unknown? Pair-ratio matching with the body's responses and with free-field
+responses, with and without the search over the delay of each pair, and SRP-PHAT. 2 one-second blocks per direction (528), 3 seeds."""
 import numpy as np
-from common import (PairScorer, BEM, FF, C0, refine, err, gauge, scores_flat, scores_delay, srp)
+from common import (PairScorer, BEM, FF, C0, refine, err, channel_errors, scores_flat, scores_delay, srp)
 
 SB, SF = PairScorer(BEM), PairScorer(FF)
 rows = {}
 for mode in ("clean", "gp", "gp+d1.5", "gp+d4"):
     res = {m: [] for m in ("BEM flat", "BEM +delay", "FF flat", "FF +delay", "SRP-PHAT")}
     for seed in ((0,) if mode == "clean" else (0, 1, 2)):
-        g = gauge(seed, mode)
+        g = channel_errors(seed, mode)
         C = (g[None, :, None, :] * np.conj(g)[None, None, :, :] * C0).astype(np.complex64)
         res["BEM flat"].append(err(refine(scores_flat(SB, C))))
         res["BEM +delay"].append(err(refine(scores_delay(SB, C))))

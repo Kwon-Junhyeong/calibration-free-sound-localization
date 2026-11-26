@@ -1,5 +1,5 @@
-"""LOCATA Task 1, eigenmike: matching with the analytic rigid-sphere replicas of the array body and with free-field
-replicas. Candidate directions every 2 degrees in azimuth and 3 degrees in elevation, band 312 to 7000 Hz."""
+"""LOCATA Task 1, eigenmike: pair-ratio matching with the analytic rigid-sphere responses of the array body and
+with free-field responses. Candidate directions every 2 degrees in azimuth and 3 degrees in elevation, band 312 to 7000 Hz."""
 import numpy as np
 from scorer import sphere_replicas, freefield_replicas, PairScorer, gc_err, uvec
 
@@ -12,7 +12,7 @@ MICS = np.array([[0, 0.039190594, 0.014969475], [-0.014969475, 0, 0.039190594],
 K = np.load("data/locata_blocks.npz")
 f = K["freqs"]
 band = (f >= 312) & (f <= 7000)
-C = np.conj(K["csm"][:, :, :, band])           # replicas are e^{-iwt}
+C = np.conj(K["csm"][:, :, :, band])           # the responses are e^{-iwt}, the STFT covariances e^{+jwt}
 A, E = np.meshgrid(np.arange(0, 360, 2.0), np.arange(-90, 91, 3.0), indexing="ij")
 cand = np.stack([A.ravel(), E.ravel()], 1)
 U = uvec(cand[:, 0], cand[:, 1])

@@ -1,6 +1,13 @@
-"""The measured box under injected channel gauges: does body scattering keep the array localizable when
-per-channel delays are unknown (the case where free-field localization is unidentifiable)?
-2 one-second blocks per direction (528), 3 gauge seeds. Grid argmin + quadratic sub-grid refinement."""
+"""Shared parts of the box experiments (unknown_channels.py, self_calibration.py).
+
+On import, reads the responses of the box (data/box_replicas_5deg.npz from build_replicas.py) and the block
+covariances of its recordings (data/box_blocks.npz from build_blocks.py), and keeps the first two one-second
+blocks of each of the 264 recordings (528 blocks). The functions add channel errors in software, match with and
+without a search over the delay of each pair, refine the best direction between grid points, measure the error
+against the true directions and run the SRP-PHAT baseline.
+
+Time convention: the BEM table and the free-field responses below are e^{+jwt}, the convention of the STFT, so
+the block covariances are matched as they are (the analytic responses in scorer.py are e^{-iwt}; see there)."""
 import numpy as np
 from scorer import PairScorer, uvec
 
@@ -44,11 +51,14 @@ def refine(score, minimize=True):
 
 
 def err(est):
+    """median angle to the true direction (deg) and the share of blocks more than 30 deg off (%)."""
     e = np.degrees(np.arccos(np.clip((est * gt).sum(1), -1, 1)))
     return np.median(e), 100 * np.mean(e > 30)
 
 
-def gauge(seed, mode):
+def channel_errors(seed, mode):
+    """One random set of channel errors as a (4, F) factor on the channels: gain within +-6 dB and any phase
+    (modes gp, gp+d1.5, gp+d4), and a delay of up to 1.5 or 4 samples (gp+d1.5, gp+d4); clean is all ones."""
     rng = np.random.default_rng(seed)
     a = 10 ** (rng.uniform(-6, 6, 4) / 20); ph = rng.uniform(-np.pi, np.pi, 4)
     dl = {"clean": 0, "gp": 0, "gp+d1.5": 1.5, "gp+d4": 4.0}[mode] * rng.uniform(-1, 1, 4) / FS
@@ -57,19 +67,24 @@ def gauge(seed, mode):
 
 
 def scores_flat(S, C):
+    """residuals of the pair-ratio matching, (B, D)."""
     return np.concatenate([S.residuals(C[b:b + 64]) for b in range(0, len(C), 64)])
 
 
+def delay_search(S, C):
+    """pair-ratio matching in which each pair may also have any of the candidate delays LAGS: the residual with
+    the best delay of each pair, (B, D), and the squared correlation over the delays, (B, P, D, L)."""
+    T, w = S.frame_terms(C)
+    X = (w * T)[:, :, None, :] * S.MijH[None]                             # (B,P,D,F)
+    num = np.abs(X @ E) ** 2                                              # (B,P,D,L)
+    den = np.einsum("bpf,pdf->bpd", w, S.Mabs2, optimize=True)
+    tn = (w * np.abs(T) ** 2).sum(-1)
+    return (1 - num.max(-1) / (den * tn[:, :, None] + 1e-30)).mean(1), num
+
+
 def scores_delay(S, C):
-    out = []
-    for b in range(0, len(C), 8):
-        T, w = S.frame_terms(C[b:b + 8])
-        X = (w * T)[:, :, None, :] * S.MijH[None]                             # (B,P,D,F)
-        num = np.abs(X @ E) ** 2                                              # (B,P,D,L)
-        den = np.einsum("bpf,pdf->bpd", w, S.Mabs2, optimize=True)
-        tn = (w * np.abs(T) ** 2).sum(-1)
-        out.append((1 - num.max(-1) / (den * tn[:, :, None] + 1e-30)).mean(1))
-    return np.concatenate(out)
+    """residuals with the delay search, (B, D), eight blocks at a time."""
+    return np.concatenate([delay_search(S, C[b:b + 8])[0] for b in range(0, len(C), 8)])
 
 
 def srp(C):

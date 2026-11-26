@@ -4,7 +4,7 @@ Sound source localization on a robot body without measured responses, direction 
 
 ![Acoustic data is hard to collect, hard to label and hard to train on, and the cycle starts again for a new robot or microphone position](docs/problem.png)
 
-On recordings of a 3D-printed box with channel gains, phases and delays added in software, the median error is 3.7° with the delays estimated from unlabeled audio, against 48.4° for SRP-PHAT. On the public LOCATA recordings, a model of the array body gives 5.7°, against 7.9° for a free-field model.
+On recordings of a 3D-printed box with channel gains, phases and delays added in software, the median error is 3.7° with the delays estimated from unlabeled audio, against 48.4° for SRP-PHAT. On the public LOCATA recordings, a rigid-sphere model of the array body gives 5.8°, against 7.9° for a free-field model.
 
 **Technical summary**
 
@@ -37,7 +37,7 @@ The dashed box is an existing tool, boxes with a solid colored outline are code 
 
 <img src="docs/response.png" width="700" alt="Level change between microphones 1 and 3 of the box when the source moves from 60 to 90 degrees: free field, computed and measured">
 
-`build_replicas.py` takes the responses of the four microphones from a BEM table of the body on a 5° grid of 2,664 directions. On a body, a change of direction changes the level difference between microphones as well as the delay. In the figure, the level difference between microphones 1 and 3 changes by up to 8.6 dB when the source moves from 60° to 90°; the free-field model predicts no change, and the computed response follows the measurement.
+`build_replicas.py` takes the responses of the four microphones (called replicas in the code) from a BEM table of the body on a 5° grid of 2,664 directions. On a body, a change of direction changes the level difference between microphones as well as the delay. In the figure, the level difference between microphones 1 and 3 changes by up to 8.6 dB when the source moves from 60° to 90°; the free-field model predicts no change, and the computed response follows the measurement.
 
 ## Matching microphone-pair ratios
 
@@ -67,15 +67,14 @@ Estimating the delays brings the body model from 31.9° to 3.7°. With delays es
 
 ![Median error against the amount of unlabeled audio, and against the channel errors added to the box](docs/result.png)
 
-**LOCATA.** Task 1 of the public LOCATA recordings: 13 recordings, eight of the 32 capsules of a spherical microphone array, 109 one-second blocks. The same pair-ratio matching, without delay estimation, runs with three models of the array on a grid of 2° in azimuth and 3° in elevation.
+**LOCATA.** Task 1 of the public LOCATA recordings: 13 recordings, eight of the 32 capsules of a spherical microphone array, 109 one-second blocks. The same pair-ratio matching, without delay estimation, runs with two models of the array on a grid of 2° in azimuth and 3° in elevation.
 
 | Model of the array | Median error |
 |---|---:|
-| BEM model of the array body | 5.7° |
 | Analytic rigid sphere | 5.8° |
 | Free field | 7.9° |
 
-Both models of the array body give lower errors than the free-field model.
+The model of the array body gives a lower error than the free-field model. In the original experiment, a BEM table of the array, which is not included here, gave 5.7°.
 
 ## Repository structure
 
@@ -86,16 +85,18 @@ Both models of the array body give lower errors than the free-field model.
 | `scorer.py` | Pair-ratio matching with the gain and phase of each pair removed |
 | `self_calibration.py` | Channel delays from unlabeled blocks, then the directions |
 | `unknown_channels.py` | Each matcher under added gains, phases and delays |
+| `demo.py` | A check without data: the estimate when every channel has its own unknown gain and phase |
 | `common.py` | Shared functions: channel errors added in software, scoring, the SRP-PHAT baseline, peak refinement, the error |
 | `build_locata_blocks.py`, `locata.py` | Blocks from the LOCATA corpus; rigid-sphere and free-field matching |
 | `docs/` | Figures |
 
 ## Setup and run
 
-Software: Python 3 with the packages in `requirements.txt`. Inputs: a BEM table of the box from stl2bem, the box recordings and the LOCATA corpus.
+Software: Python 3 with the packages in `requirements.txt`. `demo.py` needs no input. The other scripts need a BEM table of the box from stl2bem, the box recordings and the LOCATA corpus.
 
 ```sh
 pip install -r requirements.txt
+python demo.py                             # no data: pair-ratio matching and a beamformer under unknown channels
 python build_replicas.py BEM_TABLE.h5      # data/box_replicas_5deg.npz
 python build_blocks.py RECORDINGS_DIR      # data/box_blocks.npz
 python unknown_channels.py                 # each matcher under added gains, phases and delays
